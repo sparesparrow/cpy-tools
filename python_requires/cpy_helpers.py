@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # python_requires/cpy_helpers.py
-# CPython Helper Utilities for OpenSSL DevOps Ecosystem
+# SpareTools Helper Utilities for OpenSSL DevOps Ecosystem
 # @security FIPS 140-3 compliant | @mcp MCP-Prompts orchestrated
+# Part of sparetools-base python_requires package
 
 import os
 import subprocess
 import sys
+import platform
 from pathlib import Path
 import json
 from typing import Dict, List, Optional, Union
@@ -169,22 +171,36 @@ echo "Installation: $PYTHON_HOME"
             
             if src_path.exists() and not dst_path.exists():
                 if self.settings.os == "Windows":
-                    # Windows junction
-                    subprocess.run(["mklink", "/J", str(dst_path), str(src_path)], shell=True)
+                    # Windows symlink (requires admin or developer mode)
+                    try:
+                        os.symlink(str(src_path), str(dst_path), target_is_directory=True)
+                        print(f"✓ Symlinked: {src_name} -> {dst_name}")
+                    except OSError as e:
+                        # Fallback to junction via subprocess if symlink fails
+                        cmd = f'mklink /J "{dst_path}" "{src_path}"'
+                        try:
+                            subprocess.run(cmd, shell=True, check=True)
+                            print(f"✓ Junction created: {src_name} -> {dst_name}")
+                        except subprocess.CalledProcessError:
+                            print(f"✗ Failed to create symlink/junction: {e}")
+                            raise
                 else:
                     dst_path.symlink_to(src_path)
-                print(f"✓ Symlinked: {src_name} -> {dst_name}")
+                    print(f"✓ Symlinked: {src_name} -> {dst_name}")
                 
     def _get_python_version(self, install_folder: Path) -> str:
         """Extract Python version from installation"""
         try:
             python_bin = install_folder / ("python.exe" if self.settings.os == "Windows" else "bin/python3")
             if python_bin.exists():
-                result = subprocess.run([str(python_bin), "--version"], capture_output=True, text=True)
+                result = subprocess.run([str(python_bin), "--version"], capture_output=True, text=True, check=True)
                 return result.stdout.strip()
-        except:
-            pass
-        return "unknown"
+        except subprocess.CalledProcessError:
+            return "unknown"
+        except FileNotFoundError:
+            return "not installed"
+        except Exception:
+            return "unknown"
 
 
 class BuildOrchestrator:
@@ -237,9 +253,11 @@ class BuildOrchestrator:
     def _tool_available(self, tool: str) -> bool:
         """Check if tool is available in PATH"""
         try:
-            subprocess.run([tool, "--version"], capture_output=True)
+            subprocess.run([tool, "--version"], capture_output=True, check=True)
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError:
+            return False
+        except FileNotFoundError:
             return False
 
 
